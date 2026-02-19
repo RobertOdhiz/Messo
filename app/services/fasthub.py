@@ -53,19 +53,26 @@ def _redact_secret(s: str) -> str:
     return "***" + s[-4:]
 
 
-def send_sms(to_phone: str, message: str) -> tuple[bool, str]:
+def send_sms_with_response(to_phone: str, message: str) -> dict:
     """
     Send SMS via FastHub BulkSMS API.
-    POST /api/sms/send with auth (clientId, clientSecret) and messages array.
-    Returns (success, detail_message).
+    Returns dict: { success, message, fasthub: { status, message, data, balance } }
     """
     if not FASTHUB_CLIENT_ID or not FASTHUB_CLIENT_SECRET:
         logger.warning("FASTHUB_CLIENT_ID or FASTHUB_CLIENT_SECRET not set; skipping send")
-        return False, "FastHub not configured (set FASTHUB_CLIENT_ID and FASTHUB_CLIENT_SECRET)"
+        return {
+            "success": False,
+            "message": "FastHub not configured (set FASTHUB_CLIENT_ID and FASTHUB_CLIENT_SECRET)",
+            "fasthub": {"status": False, "message": "Not configured"},
+        }
 
     to_phone = _normalize_phone(to_phone)
     if not to_phone:
-        return False, "Invalid recipient phone number"
+        return {
+            "success": False,
+            "message": "Invalid recipient phone number",
+            "fasthub": None,
+        }
 
     url = f"{FASTHUB_API_URL}/api/sms/send"
     reference = _new_reference()
@@ -101,12 +108,23 @@ def send_sms(to_phone: str, message: str) -> tuple[bool, str]:
             except Exception:
                 pass
 
+        fasthub_resp = {
+            "status": data.get("status"),
+            "message": data.get("message"),
+            "data": data.get("data"),
+            "balance": data.get("balance"),
+        }
+
         if resp.status_code == 200 and data.get("status") is True:
             msg = data.get("message", "sent")
             balance = data.get("balance")
             if balance is not None:
                 msg = f"{msg} (balance: {balance})"
-            return True, f"{msg} (ref: {reference})"
+            return {
+                "success": True,
+                "message": f"{msg} (ref: {reference})",
+                "fasthub": fasthub_resp,
+            }
 
         # Error
         err_msg = data.get("message", resp.text or f"HTTP {resp.status_code}")
@@ -122,16 +140,26 @@ def send_sms(to_phone: str, message: str) -> tuple[bool, str]:
             err_msg = f"{err_msg} (ref: {reference}, details: {extra_str})"
         else:
             err_msg = f"{err_msg} (ref: {reference})"
-        return False, err_msg
+        return {
+            "success": False,
+            "message": err_msg,
+            "fasthub": fasthub_resp,
+        }
 
     except httpx.TimeoutException:
-        return False, "Request timed out"
+        return {"success": False, "message": "Request timed out", "fasthub": None}
     except httpx.RequestError as e:
         logger.exception("FastHub request failed")
-        return False, str(e)
+        return {"success": False, "message": str(e), "fasthub": None}
     except Exception as e:
         logger.exception("FastHub send failed")
-        return False, str(e)
+        return {"success": False, "message": str(e), "fasthub": None}
+
+
+def send_sms(to_phone: str, message: str) -> tuple[bool, str]:
+    """Send SMS via FastHub; returns (success, message) for backward compatibility."""
+    r = send_sms_with_response(to_phone, message)
+    return r["success"], r["message"]
 
 
 def _normalize_phone(s: str) -> str:

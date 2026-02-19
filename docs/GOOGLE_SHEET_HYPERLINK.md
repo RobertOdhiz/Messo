@@ -2,15 +2,49 @@
 
 Use one hyperlink that sends **row 1 (headers)** and **current row (data)**. The server parses them and extracts NAME, PHONE, PRODUCT NAME, AGENT PHONE, etc. by header name, so column order doesn’t matter.
 
-## Formula (one per row)
+## URL truncation
 
-**Row 2** – replace `http://localhost:8000` with your app URL.  
-**Range B:U** = from your first data column (e.g. ORDER NUMBER in B) through **AGENT PHONE** (e.g. in U). Change `B`/`U` if your AGENT PHONE column is elsewhere.
+**GET URLs are limited to ~2048 characters.** With many columns (B:W), the URL can be cut off and **AGENT PHONE** is lost. Use the **minimal-column formula** below.
 
-**Use `FALSE` in TEXTJOIN** so empty cells are included and the number of columns matches between header and data rows.
+---
+
+## Minimal-column formula (recommended)
+
+Only include required columns. Adjust letters to match your sheet. Example: ORDER NUMBER=C, AMOUNT=D, NAME=E, ADDRESS=F, PHONE=G, ALT NO=H, COUNTRY=I, CITY=J, PRODUCT NAME=K, AGENT PHONE=V.
 
 ```
-=HYPERLINK("http://localhost:8000/send-sms?csv="&ENCODEURL(TEXTJOIN("|",FALSE,$B$1:$U$1)&CHAR(10)&TEXTJOIN("|",FALSE,B2:U2)), "Send SMS")
+=HYPERLINK(
+"https://sheets.fulfillmentea.com/send-sms?csv="&
+ENCODEURL(
+SUBSTITUTE(TEXTJOIN("|",FALSE,$C$1:$K$1,$V$1),CHAR(10)," ")&CHAR(10)&
+SUBSTITUTE(TEXTJOIN("|",FALSE,INDEX(C:K,ROW(),0),INDEX(V:V,ROW(),0)),CHAR(10)," ")
+)&
+"&debug=1",
+"Send SMS"
+)
+```
+
+For a sheet named `19-FEB`, use `'19-FEB'!$C$1:$K$1` and `INDEX('19-FEB'!C:K,ROW(),0)` etc.
+
+---
+
+## Full-range formula
+
+**Row 2** – replace the URL with your app URL.  
+**Range B:U** = from your first data column (e.g. ORDER NUMBER in B) through **AGENT PHONE** (e.g. in U). Change `B`/`U` if your AGENT PHONE column is elsewhere.
+
+**Use `FALSE`** so empty cells are included. **SUBSTITUTE(CHAR(10)," ")** flattens newlines inside cells.
+
+```
+=HYPERLINK(
+"https://sheets.fulfillmentea.com/send-sms?csv="&
+ENCODEURL(
+SUBSTITUTE(TEXTJOIN("|",FALSE,$B$1:$W$1),CHAR(10)," ")&CHAR(10)&
+SUBSTITUTE(TEXTJOIN("|",FALSE,INDEX(B:W,ROW(),0)),CHAR(10)," ")
+)&
+"&debug=1",
+"Send SMS"
+)
 ```
 
 - **Row 2:** use `B2:U2` as above.
