@@ -81,14 +81,16 @@ def _row_from_csv_string(csv_string: str) -> dict | None:
         return None
     # Normalize line endings (\\n, \\r\\n, \\r) so we always get exactly 2 lines
     decoded = decoded.replace("\r\n", "\n").replace("\r", "\n")
-    lines = [ln.strip() for ln in decoded.split("\n") if ln.strip()]
+    lines = [ln for ln in decoded.split("\n") if ln.strip()]
     if len(lines) < 2:
         return None
 
     # Pipe-delimited (headers and row; use TEXTJOIN("|", FALSE, ...) in Sheets so column count matches)
+    # Cells with embedded newlines cause extra lines; merge all data lines and replace newlines
     if "|" in lines[0]:
         headers = [h.strip() for h in lines[0].split("|")]
-        values = [v.strip() for v in lines[1].split("|")]
+        data_joined = " ".join(ln.replace("\r", " ") for ln in lines[1:]).replace("\n", " ")
+        values = [v.strip() for v in data_joined.split("|")]
         # Align lengths: if TEXTJOIN skipped empty cells, pad values so we don't misalign
         if len(values) < len(headers):
             values = values + [""] * (len(headers) - len(values))
