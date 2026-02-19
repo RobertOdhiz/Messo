@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.services import build_sms_body, send_sms as do_send_sms
 from app.services.validate_row import (
-    get_agent_phone_from_row,
+    get_agent_phones_from_row,
     validate_row,
 )
 
@@ -25,7 +25,7 @@ ERROR_CLOSE_MS = 0
 ROUTE_BUILD_ID = "2026-02-18-csvpipe-rawquery-debug"
 
 
-def _console_log_before_send(row: dict, recipient: str, body: str) -> None:
+def _console_log_before_send(row: dict, recipients: list[str], body: str) -> None:
     """Print parsed row and built message to console so it's visible in uvicorn output."""
     import json as _json
     def _mask(s: str) -> str:
@@ -41,8 +41,8 @@ def _console_log_before_send(row: dict, recipient: str, body: str) -> None:
             safe_row[k] = val[:80] + "…" if len(val) > 80 else val
     print("\n--- send-sms: parsed row (sanitized) ---")
     print(_json.dumps(safe_row, indent=2, ensure_ascii=False))
-    print("--- recipient (msisdn) ---")
-    print(recipient)
+    print("--- recipients (msisdn) ---")
+    print(recipients)
     print("--- built SMS body ---")
     print(body)
     print("--- end ---\n")
@@ -120,12 +120,14 @@ def _html_result(
     success: bool,
     detail: str,
     recipient: str | None = None,
+    recipients: list[str] | None = None,
     empty_fields: list[str] | None = None,
     close_after_ms: int = 0,
     debug_build: str | None = None,
 ) -> str:
     status_text = "SMS sent successfully" if success else "Failed to send SMS"
-    detail_text = f"To: {recipient}" if success and recipient else detail
+    to_display = ", ".join(recipients) if recipients else recipient
+    detail_text = f"To: {to_display}" if success and to_display else detail
     card_class = "success" if success else "error"
 
     empty_block = ""
@@ -188,7 +190,8 @@ def send_sms_page(request: Request):
     2) Query params: ?NAME=...&PHONE=...&AGENT_PHONE=... etc.
        All query params become the row (keys normalized). Use column headers as param names.
 
-    Validates required fields (NAME, PHONE or ALT NO, PRODUCT NAME, AMOUNT, ADDRESS, CITY, AGENT PHONE).
+    Validates required fields (NAME, PHONE or ALT NO, PRODUCT NAME, AMOUNT, AGENT PHONE).
+    AGENT PHONE can be slash-separated for multiple recipients (e.g. 255xxx/255yyy).
     Success: window closes after 6 seconds. Error: window stays open and shows empty/missing fields.
     """
     query_params = dict(request.query_params)
@@ -286,29 +289,43 @@ def send_sms_page(request: Request):
             )
         )
 
-    recipient = get_agent_phone_from_row(row)
+    recipients = get_agent_phones_from_row(row)
     body = build_sms_body(row)
     # Console: show parsed row and body before sending
-    _console_log_before_send(row, recipient, body)
-    success, msg = do_send_sms(recipient, body)
+    _console_log_before_send(row, recipients, body)
 
-    if not success:
+    results: list[tuple[str, bool, str]] = []
+    for r in recipients:
+        ok, m = do_send_sms(r, body)
+        results.append((r, ok, m))
+
+    ok_count = sum(1 for _, ok, _ in results if ok)
+    fail_count = len(results) - ok_count
+
+    if fail_count == 0:
+        detail = f"Sent to {ok_count} recipient{'s' if ok_count != 1 else ''}." if ok_count > 1 else (results[0][2] if results else "Sent.")
         return HTMLResponse(
             _html_result(
-                success=False,
-                detail=msg,
-                recipient=recipient,
-                close_after_ms=ERROR_CLOSE_MS,
+                success=True,
+                detail=detail,
+                recipients=recipients,
+                close_after_ms=SUCCESS_CLOSE_MS,
                 debug_build=dbg_build,
             )
         )
 
+    # At least one failed
+    failed = [r for r, ok, m in results if not ok]
+    msgs = [m for _, ok, m in results if not ok]
+    detail = f"Failed for {len(failed)} of {len(results)}: {'; '.join(msgs[:3])}{'…' if len(msgs) > 3 else ''}"
+    if failed:
+        detail += f" (failed: {', '.join(failed)})"
     return HTMLResponse(
         _html_result(
-            success=True,
-            detail=msg,
-            recipient=recipient,
-            close_after_ms=SUCCESS_CLOSE_MS,
+            success=False,
+            detail=detail,
+            recipients=recipients,
+            close_after_ms=ERROR_CLOSE_MS,
             debug_build=dbg_build,
         )
     )

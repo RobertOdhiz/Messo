@@ -51,8 +51,8 @@ def validate_row(row: dict[str, Any]) -> Tuple[bool, List[str]]:
         if not _get(row, *keys):
             empty.append(display)
 
-    # Recipient (AGENT PHONE)
-    if not get_agent_phone_from_row(row):
+    # Recipient (AGENT PHONE, comma/semicolon-separated for multiple)
+    if not get_agent_phones_from_row(row):
         empty.append("AGENT PHONE")
 
     # At least one phone (PHONE or ALT NO)
@@ -66,11 +66,28 @@ def validate_row(row: dict[str, Any]) -> Tuple[bool, List[str]]:
     return (len(empty) == 0, empty)
 
 
-def get_agent_phone_from_row(row: dict[str, Any]) -> str:
-    """Return agent phone (recipient) from row."""
+def get_agent_phones_from_row(row: dict[str, Any]) -> List[str]:
+    """
+    Return list of agent phone numbers (recipients) from row.
+    AGENT PHONE can be slash-separated for multiple recipients (e.g. 255xxx/255yyy).
+    """
+    raw = ""
     for k in ("agent phone", "agent_phone", "AGENT PHONE", "Agent Phone"):
         v = row.get(k)
         if v is not None and str(v).strip():
-            return str(v).strip()
-    # Fallback: any key containing both "agent" and "phone"
-    return _get_by_contains(row, "agent", "phone")
+            raw = str(v).strip()
+            break
+    if not raw:
+        raw = _get_by_contains(row, "agent", "phone")
+    if not raw:
+        return []
+
+    # Split on slash, strip, filter empty
+    parts = raw.split("/")
+    return [p.strip() for p in parts if p.strip()]
+
+
+def get_agent_phone_from_row(row: dict[str, Any]) -> str:
+    """Return first agent phone (backward compatibility)."""
+    phones = get_agent_phones_from_row(row)
+    return phones[0] if phones else ""
